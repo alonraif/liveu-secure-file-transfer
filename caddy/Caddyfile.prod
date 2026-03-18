@@ -1,0 +1,9 @@
+{
+  email {$LETSENCRYPT_EMAIL}
+  admin 0.0.0.0:2019
+}
+
+{$CADDY_SITE_ADDRESS} {
+  encode gzip zstd
+  reverse_proxy web:3000
+}

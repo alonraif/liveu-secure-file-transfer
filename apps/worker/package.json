@@ -1,0 +1,21 @@
+{
+  "name": "@liveu-sft/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@liveu-sft/config": "0.1.0",
+    "@prisma/client": "5.15.0",
+    "pino": "9.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.12.12",
+    "tsup": "8.1.0"
+  }
+}

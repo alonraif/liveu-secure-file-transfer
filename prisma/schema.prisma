@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+enum SessionType {
+  PASSWORD
+  RESET
+}
+
+enum ShareStatus {
+  CREATED
+  EMAIL_SENT
+  OPENED
+  DOWNLOADED
+  EXPIRED
+  REVOKED
+}
+
+enum ShareExpirationMode {
+  DAYS
+  FIRST_DOWNLOAD
+}
+
+enum ShareFileStatus {
+  ACTIVE
+  DELETED
+  ORPHANED
+}
+
+enum RecipientDeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum AuditActorType {
+  SYSTEM
+  USER
+  RECIPIENT
+}
+
+enum AuditEventType {
+  ADMIN_LOGIN
+  ADMIN_LOGIN_FAILED
+  ADMIN_LOGOUT
+  USER_LOGIN
+  USER_LOGIN_FAILED
+  USER_LOGOUT
+  PASSWORD_CHANGE
+  PASSWORD_RESET
+  USER_CREATED
+  USER_UPDATED
+  USER_DISABLED
+  USER_DELETED
+  SHARE_CREATED
+  EMAIL_SENT
+  LINK_OPENED
+  DOWNLOAD_SUCCESS
+  DOWNLOAD_DENIED
+  SHARE_REVOKED
+  SHARE_EXPIRED
+  FILE_DELETED
+  HOSTNAME_CHANGED
+  SSL_ISSUED
+  SSL_RENEWAL_SUCCESS
+  SSL_RENEWAL_FAILURE
+  SECURITY_SETTINGS_CHANGED
+  CSRF_BLOCKED
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum JobRunStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id                   String      @id @default(cuid())
+  email                String      @unique
+  username             String      @unique
+  firstName            String?
+  lastName             String?
+  passwordHash         String
+  role                 UserRole    @default(USER)
+  status               UserStatus  @default(ACTIVE)
+  forcePasswordReset   Boolean     @default(true)
+  failedLoginCount     Int         @default(0)
+  lockedUntil          DateTime?
+  lastLoginAt          DateTime?
+  disabledAt           DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  sessions             Session[]
+  sentShares           Share[]
+  auditLogs            AuditLog[]  @relation("AuditActorUser")
+  issuedEmails         EmailDelivery[] @relation("EmailTriggeredBy")
+
+  @@index([status])
+  @@index([role])
+}
+
+model Session {
+  id             String      @id @default(cuid())
+  userId         String
+  type           SessionType @default(PASSWORD)
+  tokenHash      String      @unique
+  expiresAt      DateTime
+  lastSeenAt     DateTime?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Share {
+  id                  String               @id @default(cuid())
+  senderId            String
+  tokenHash           String               @unique
+  title               String?
+  message             String?
+  status              ShareStatus          @default(CREATED)
+  expirationMode      ShareExpirationMode
+  expiresAt           DateTime?
+  maxDownloads        Int?
+  downloadCount       Int                  @default(0)
+  passwordHash        String?
+  openedAt            DateTime?
+  firstDownloadedAt   DateTime?
+  lastDownloadedAt    DateTime?
+  revokedAt           DateTime?
+  revokedByUserId     String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  sender              User                 @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  recipients          ShareRecipient[]
+  files               ShareFile[]
+  emailDeliveries     EmailDelivery[]
+  accessEvents        ShareAccessEvent[]
+
+  @@index([senderId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model ShareRecipient {
+  id                 String                  @id @default(cuid())
+  shareId            String
+  email              String
+  name               String?
+  accessTokenHash    String                  @unique
+  deliveryStatus     RecipientDeliveryStatus @default(PENDING)
+  openedAt           DateTime?
+  downloadedAt       DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  share              Share                   @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@unique([shareId, email])
+  @@index([deliveryStatus])
+}
+
+model ShareFile {
+  id                 String          @id @default(cuid())
+  shareId            String
+  objectKey          String          @unique
+  originalName       String
+  contentType        String?
+  sizeBytes          BigInt
+  sha256             String?
+  storageProvider    String          @default("s3")
+  status             ShareFileStatus @default(ACTIVE)
+  deletedAt          DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  share              Share           @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId])
+  @@index([status])
+}
+
+model ShareAccessEvent {
+  id                 String     @id @default(cuid())
+  shareId            String
+  recipientEmail     String?
+  eventType          AuditEventType
+  allowed            Boolean
+  ipAddress          String?
+  userAgent          String?
+  createdAt          DateTime   @default(now())
+  share              Share      @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId])
+  @@index([eventType])
+}
+
+model PlatformSetting {
+  id                        Int       @id @default(1)
+  publicHostname            String?
+  letsEncryptEnabled        Boolean   @default(false)
+  brandName                 String    @default("LiveU Secure File Transfer")
+  brandPrimaryColor         String    @default("#0F5BD8")
+  defaultShareExpirationDays Int      @default(7)
+  maxFileSizeBytes          BigInt    @default(1073741824)
+  allowedFileTypes          Json?
+  retentionDays             Int       @default(30)
+  keepMetadataAfterDeletion Boolean   @default(true)
+  smtpHost                  String?
+  smtpPort                  Int?
+  smtpSecure                Boolean   @default(false)
+  smtpUsername              String?
+  smtpFrom                  String?
+  updatedAt                 DateTime  @updatedAt
+  createdAt                 DateTime  @default(now())
+}
+
+model SslCertificateStatus {
+  id               Int       @id @default(1)
+  hostname         String?
+  enabled          Boolean   @default(false)
+  status           String    @default("disabled")
+  issuedAt         DateTime?
+  expiresAt        DateTime?
+  lastRenewedAt    DateTime?
+  lastError        String?
+  rawMetadata      Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model EmailDelivery {
+  id                 String              @id @default(cuid())
+  shareId            String?
+  recipient          String
+  subject            String
+  templateKey        String
+  status             EmailDeliveryStatus @default(PENDING)
+  providerMessageId  String?
+  lastError          String?
+  triggeredByUserId  String?
+  sentAt             DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  share              Share?              @relation(fields: [shareId], references: [id], onDelete: SetNull)
+  triggeredBy        User?               @relation("EmailTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+
+  @@index([shareId])
+  @@index([status])
+}
+
+model AuditLog {
+  id              String         @id @default(cuid())
+  actorType       AuditActorType
+  actorUserId     String?
+  actorLabel      String?
+  eventType       AuditEventType
+  entityType      String
+  entityId        String?
+  metadata        Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime       @default(now())
+  actorUser       User?          @relation("AuditActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([eventType])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model JobRun {
+  id              String       @id @default(cuid())
+  jobName         String
+  status          JobRunStatus
+  startedAt       DateTime     @default(now())
+  finishedAt      DateTime?
+  errorMessage    String?
+  details         Json?
+
+  @@index([jobName, startedAt])
+  @@index([status])
+}

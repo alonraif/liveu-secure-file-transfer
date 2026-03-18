@@ -1,0 +1,37 @@
+services:
+  caddy:
+    volumes:
+      - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+
+  web:
+    build:
+      context: .
+      target: web-prod
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    volumes: []
+
+  worker:
+    build:
+      context: .
+      target: worker-prod
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+    volumes: []
+
+  migrate:
+    build:
+      context: .
+      target: web-dev
+    profiles: ["ops"]
+    command: ["npm", "run", "db:push"]
+
+  seed:
+    build:
+      context: .
+      target: web-dev
+    profiles: ["ops"]
+    command: ["npm", "run", "db:seed"]

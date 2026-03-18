@@ -1,0 +1,27 @@
+{
+  "name": "liveu-secure-file-transfer",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @liveu-sft/web",
+    "dev:worker": "npm run dev -w @liveu-sft/worker",
+    "build": "npm run db:generate && npm run build -w @liveu-sft/config && npm run build -w @liveu-sft/worker && npm run build -w @liveu-sft/web",
+    "start:web": "npm run start -w @liveu-sft/web",
+    "start:worker": "npm run start -w @liveu-sft/worker",
+    "db:generate": "prisma generate",
+    "db:push": "prisma migrate deploy",
+    "db:seed": "npm run db:generate && npm run build -w @liveu-sft/config && tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "prisma": "5.15.0",
+    "tsx": "4.15.7",
+    "typescript": "5.4.5"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
