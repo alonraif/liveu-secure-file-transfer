@@ -1,74 +1,292 @@
 # LiveU Secure File Transfer
 
-Production-oriented, Docker-first platform for securely sending files from authenticated internal users to external recipients through expiring, auditable download links.
+Docker-first internal platform for securely sending files from authenticated internal users to external recipients through expiring, auditable download links.
 
-## Current milestone
+## Stack
 
-Phase 1 and Phase 2 are in place:
+- Frontend and API: Next.js 14 App Router with TypeScript
+- Database: PostgreSQL 16
+- ORM: Prisma
+- Auth: local username or email plus password with DB-backed sessions
+- Password hashing: Argon2 via `@node-rs/argon2`
+- Storage: S3-compatible abstraction, MinIO locally
+- Email: SMTP via Nodemailer, Mailpit locally
+- Reverse proxy: Caddy
+- Background jobs: dedicated worker service
 
-- Dockerized multi-service scaffold
-- Next.js web app shell
-- Dedicated worker service shell
-- PostgreSQL, MinIO, Mailpit, and Caddy wired into Compose
-- Prisma schema for the core domain
-- Environment templates and seed script
+Architecture notes live in [docs/architecture.md](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/docs/architecture.md).
 
-## Architecture summary
+## What Works Today
 
-- `web`: Next.js app router, UI, API routes, auth boundary
-- `worker`: background jobs and cleanup orchestration
-- `db`: PostgreSQL
-- `minio`: local S3-compatible storage
-- `mailpit`: local SMTP capture
-- `caddy`: reverse proxy and production TLS automation
+- Fully containerized local development with Docker Compose
+- Admin and user login with password reset enforcement
+- DB-backed session management
+- Super Admin user management
+- Secure share creation with one or more recipients
+- Recipient landing page and validated download flow
+- Audit logging foundation
+- PostgreSQL, MinIO, Mailpit, worker, and Caddy wired together
+- Production Compose override and Caddy production config
 
-Detailed decisions live in [docs/architecture.md](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/docs/architecture.md).
+## Repository Layout
 
-## Quick start
+```text
+apps/
+  web/        Next.js UI and API surface
+  worker/     Background jobs and operational endpoints
+packages/
+  config/     Shared typed environment parsing
+prisma/       Prisma schema, migrations, and seed script
+caddy/        Development and production reverse proxy config
+docs/         Architecture notes
+```
 
-1. Create an environment file:
+## Quick Start
+
+1. Copy the environment template:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Build and start the stack:
+2. Start the full local stack:
 
 ```bash
 docker compose up --build
 ```
 
-3. In a separate shell, initialize the database schema:
+3. In another shell, apply database migrations:
 
 ```bash
 docker compose --profile ops run --rm migrate
 ```
 
-4. Seed the initial admin user:
+4. Seed the baseline platform settings and default admin:
 
 ```bash
 docker compose --profile ops run --rm seed
 ```
 
-## Local endpoints
+5. Open the local services:
 
-- App via Caddy: `http://localhost`
-- Web container direct: `http://localhost:3000` is intentionally not exposed
-- Mailpit UI: `http://localhost:8025`
-- MinIO API: internal only for now
+- App: `http://localhost`
+- Mailpit: `http://localhost:8025`
 
-## Default seeded admin
+## Local Services
 
-- Email: value of `DEFAULT_ADMIN_EMAIL` in `.env`
-- Username: value of `DEFAULT_ADMIN_USERNAME` in `.env`
-- Password: value of `DEFAULT_ADMIN_PASSWORD` in `.env`
+- `web`: Next.js app
+- `worker`: background worker
+- `db`: PostgreSQL
+- `minio`: local S3-compatible object storage
+- `minio-init`: local bucket bootstrap
+- `mailpit`: local SMTP sink and UI
+- `caddy`: reverse proxy in front of the app
 
-The seeded admin is forced to reset the password on first real login once auth is implemented.
+## Default Seeded Admin
 
-## Notes
+The seed script creates the default administrator from `.env`:
 
-- Phase 3 adds the implemented backend services, migrations, auth, validation, and protected API routes.
-- Phase 4 adds the full admin, user, and recipient UI flows.
-- Phase 5 adds audit logging, rate limiting, secure downloads, cleanup jobs, and email delivery logic.
-- Phase 6 adds Caddy operational integration, health and readiness detail, MinIO provisioning polish, and deployment documentation.
-- Phase 7 adds tests and final hardening.
+- Email: `DEFAULT_ADMIN_EMAIL`
+- Username: `DEFAULT_ADMIN_USERNAME`
+- Password: `DEFAULT_ADMIN_PASSWORD`
+
+The default seeded account is forced to reset its password on first login.
+
+## Common Commands
+
+Start or rebuild the local stack:
+
+```bash
+docker compose up --build
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+Reset all data volumes:
+
+```bash
+docker compose down -v
+```
+
+Apply migrations:
+
+```bash
+docker compose --profile ops run --rm migrate
+```
+
+Run the seed script:
+
+```bash
+docker compose --profile ops run --rm seed
+```
+
+## Configuration
+
+Application and infrastructure configuration is driven by `.env`. The schema is validated in [packages/config/src/env.ts](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/packages/config/src/env.ts), and the template lives in [.env.example](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/.env.example).
+
+### Hostname
+
+For local development:
+
+```env
+APP_PUBLIC_URL=http://localhost
+CADDY_SITE_ADDRESS=localhost
+```
+
+For production:
+
+```env
+APP_PUBLIC_URL=https://files.example.com
+CADDY_SITE_ADDRESS=files.example.com
+LETSENCRYPT_EMAIL=infra@example.com
+```
+
+Use:
+
+- `APP_PUBLIC_URL` for externally visible links generated by the app
+- `CADDY_SITE_ADDRESS` for the hostname served by Caddy
+- `LETSENCRYPT_EMAIL` for ACME registration in production
+
+### SSL
+
+#### Automatic Let’s Encrypt with Caddy
+
+This is the default production path. Set:
+
+```env
+CADDY_SITE_ADDRESS=files.example.com
+LETSENCRYPT_EMAIL=infra@example.com
+APP_PUBLIC_URL=https://files.example.com
+```
+
+Point DNS for `files.example.com` to the server, then run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Caddy will obtain and renew certificates automatically using [caddy/Caddyfile.prod](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/caddy/Caddyfile.prod).
+
+#### Manual Certificate and Private Key
+
+Manual certificate mounting is not wired by env vars yet, but Caddy supports it directly. Update [caddy/Caddyfile.prod](/Users/alonrliveu.tv/Dev/liveu-secure-file-transfer/caddy/Caddyfile.prod) to use:
+
+```caddy
+{$CADDY_SITE_ADDRESS} {
+  tls /certs/fullchain.pem /certs/privkey.pem
+  encode gzip zstd
+  reverse_proxy web:3000
+}
+```
+
+Then mount your certificates into the `caddy` service, for example:
+
+```yaml
+caddy:
+  volumes:
+    - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+    - ./certs:/certs:ro
+    - caddy_data:/data
+    - caddy_config:/config
+```
+
+Notes:
+
+- `fullchain.pem` is the public certificate chain
+- `privkey.pem` is the private key
+- the database contains SSL status models, but admin-side certificate management is not fully implemented yet
+
+### SMTP
+
+Local development uses Mailpit by default:
+
+```env
+SMTP_HOST=mailpit
+SMTP_PORT=1025
+SMTP_SECURE=false
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM=LiveU Secure File Transfer <no-reply@liveu.local>
+```
+
+Production SMTP example:
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USERNAME=mailer-user
+SMTP_PASSWORD=mailer-password
+SMTP_FROM=LiveU Secure File Transfer <no-reply@example.com>
+```
+
+Typical values:
+
+- port `587` with `SMTP_SECURE=false` for STARTTLS
+- port `465` with `SMTP_SECURE=true` for implicit TLS
+
+### Object Storage
+
+Local development uses MinIO through the S3 abstraction:
+
+```env
+S3_ENDPOINT=http://minio:9000
+S3_REGION=us-east-1
+S3_BUCKET=liveu-secure-transfers
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
+S3_FORCE_PATH_STYLE=true
+```
+
+For production, point the same variables at AWS S3 or another compatible provider.
+
+## Deployment
+
+Use the production override for production-style images and Caddy TLS automation:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Then apply migrations and seed data if needed:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile ops run --rm migrate
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile ops run --rm seed
+```
+
+Persistent volumes used by the stack:
+
+- PostgreSQL data
+- MinIO data
+- Caddy certificates and config state
+- local container dependency cache volumes
+
+## Health and Operations
+
+- Web health endpoint: `/api/health`
+- Web readiness endpoint: `/api/ready`
+- Mail inspection UI: `http://localhost:8025`
+
+## Security Notes
+
+- Passwords are hashed with Argon2
+- Sessions are stored in PostgreSQL with hashed tokens
+- State-changing browser requests enforce trusted origin checks
+- Share downloads are validated server-side and never expose long-lived raw storage URLs
+- Recipient access is recipient-bound, not token-only
+- Critical events are recorded in the audit log
+
+## Current Gaps
+
+This is a real MVP foundation, but a few production features are still incomplete:
+
+- full SMTP delivery lifecycle and retries
+- background cleanup and retention jobs
+- richer SSL visibility and operational dashboards
+- automated tests and broader integration coverage
+- admin-driven runtime settings management for all infrastructure fields
